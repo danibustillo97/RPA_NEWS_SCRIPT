@@ -11,14 +11,14 @@ from dotenv import load_dotenv
 
 # 🔐 Configuración de entorno
 load_dotenv()
-OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY")
+OPENROUTER_API_KEY = "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"
 SUPABASE_URL = os.getenv("SUPABASE_URL")
 SUPABASE_KEY = os.getenv("SUPABASE_KEY")
+
 supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
 
-# 📰 Fuentes mejoradas
 NEWS_SOURCES = [
-    "https://www.espn.com.co/", "https://www.tycsports.com/", "https://www.goal.com/es",
+    "https://www.espn.com.co/", "https://www.tycsports.com/",
     "https://as.com/", "https://www.marca.com/", "https://www.futbolred.com/",
     "https://www.elgrafico.com.ar/", "https://www.rpctv.com/deportes", "https://www.ovacion.pe/",
     "https://www.eluniverso.com/deportes/", "https://mexico.as.com/", "https://espndeportes.espn.com/",
@@ -27,115 +27,39 @@ NEWS_SOURCES = [
     "https://www.depor.com/", "https://www.tudn.com/futbol", "https://www.larepublica.pe/deportes/"
 ]
 
-# Categorías
 LEAGUE_KEYWORDS = {
-    "premier": "Premier League", "laliga": "La Liga", "liga española": "La Liga", "bundesliga": "Bundesliga",
-    "serie a": "Serie A", "champions": "Champions League", "libertadores": "Copa Libertadores",
-    "sudamericana": "Copa Sudamericana", "mls": "MLS", "colombia": "Liga BetPlay",
-    "argentina": "Liga Profesional Argentina", "brasil": "Brasileirão", "liga mx": "Liga MX",
-    "ecuador": "LigaPro", "perú": "Liga 1", "uruguay": "Primera División Uruguay",
-    "paraguay": "Primera División Paraguay", "chile": "Primera División Chile"
+    "premier": "Premier League",
+    "laliga": "La Liga",
+    "liga española": "La Liga",
+    "bundesliga": "Bundesliga",
+    "serie a": "Serie A",
+    "champions": "Champions League",
+    "libertadores": "Copa Libertadores",
+    "sudamericana": "Copa Sudamericana",
+    "mls": "MLS",
+    "colombia": "Liga BetPlay",
+    "argentina": "Liga Profesional Argentina",
+    "brasil": "Brasileirão",
+    "liga mx": "Liga MX",
+    "ecuador": "LigaPro",
+    "perú": "Liga 1",
+    "uruguay": "Primera División Uruguay",
+    "paraguay": "Primera División Paraguay",
+    "chile": "Primera División Chile"
 }
 
 COUNTRIES = [
-    "colombia", "españa", "argentina", "brasil", "méxico", "alemania", "inglaterra", "italia",
-    "francia", "ecuador", "perú", "uruguay", "chile", "paraguay", "venezuela", "estados unidos"
+    "colombia", "españa", "argentina", "brasil", "méxico", "alemania", "inglaterra", "italia", "francia",
+    "ecuador", "perú", "uruguay", "chile", "paraguay", "venezuela", "estados unidos"
 ]
 
 TEAMS = [
     "barcelona", "real madrid", "manchester", "liverpool", "juventus", "bayern", "inter", "milan",
-    "river", "boca", "nacional", "junior", "américa", "santa fe", "medellín", "atlético nacional",
+    "river", "boca", "nacional", "junior", "américa", "santa fe", "medellín", "atlético nacional", 
     "flamengo", "palmeiras", "pumas", "chivas", "cruz azul"
 ]
 
 OPENROUTER_MODEL = "meta-llama/llama-3-70b-instruct"
-
-def clean_text(t):
-    return re.sub(r'\s+', ' ', t).strip()
-
-def normalize_url(url):
-    return re.sub(r'\?.*$', '', url).rstrip("/")
-
-def extract_domain(url):
-    try:
-        return urlparse(url).netloc.replace("www.", "")
-    except:
-        return None
-
-def is_duplicate(title, url):
-    slug = hashlib.md5(title.encode()).hexdigest()
-    norm_url = normalize_url(url)
-    r = supabase.table("news").select("slug, source_url").or_(
-        f"slug.eq.{slug},source_url.eq.{norm_url}"
-    ).execute()
-    return len(r.data) > 0
-
-def is_valid_article_link(href, text):
-    href = href.lower()
-    return (
-        any(p in href for p in ["/202", "/deportes", "/noticia", "/futbol", "news"]) and
-        len(text) > 40 and not href.endswith(".pdf")
-    )
-
-def extract_image_url(url):
-    try:
-        r = requests.get(url, timeout=10)
-        s = BeautifulSoup(r.text, "html.parser")
-        m = s.find("meta", property="og:image")
-        if m and m.get("content"):
-            return m["content"]
-        img = s.find("img")
-        if img and img.get("src") and not img["src"].startswith("data:"):
-            return img["src"]
-    except Exception as e:
-        print("⚠️ Img error:", e)
-    return "https://via.placeholder.com/1200x675.png?text=Noticia+deportiva"
-
-def rewrite_title(title):
-    print(f"✍️ Reescribiendo título: {title}")
-    headers = {
-        "Authorization": f"Bearer {OPENROUTER_API_KEY}",
-        "Content-Type": "application/json"
-    }
-    payload = {
-        "model": OPENROUTER_MODEL,
-        "messages": [
-            {"role": "system", "content": "Responde solo con el título reescrito. No agregues comillas ni explicaciones. Máximo 12 palabras."},
-            {"role": "user", "content": f"{title}"}
-        ]
-    }
-    try:
-        r = requests.post("https://openrouter.ai/api/v1/chat/completions", headers=headers, json=payload, timeout=20)
-        if r.status_code == 200:
-            new_title = r.json()["choices"][0]["message"]["content"].strip()
-            return new_title if len(new_title.split()) >= 5 else title
-    except Exception as e:
-        print("⚠️ Error conexión OpenRouter:", e)
-    return title
-
-def generate_content(title, source_url):
-    headers = {
-        "Authorization": f"Bearer {OPENROUTER_API_KEY}",
-        "Content-Type": "application/json"
-    }
-    prompt = (
-        f"Redacta una noticia profesional clara, sin adornos, basada en este título: {title}. "
-        f"Solo contenido puro, sin repetir el título ni añadir instrucciones. Cierra con esta fuente: {source_url}"
-    )
-    payload = {
-        "model": OPENROUTER_MODEL,
-        "messages": [
-            {"role": "system", "content": "Responde solo con el contenido. No incluyas instrucciones."},
-            {"role": "user", "content": prompt}
-        ]
-    }
-    try:
-        r = requests.post("https://openrouter.ai/api/v1/chat/completions", headers=headers, json=payload, timeout=30)
-        if r.status_code == 200:
-            return r.json()["choices"][0]["message"]["content"].strip()
-    except Exception as e:
-        print("⚠️ Error OpenRouter:", e)
-    return ""
 
 def detect_league(t): 
     for k, v in LEAGUE_KEYWORDS.items():
@@ -155,12 +79,138 @@ def detect_team(text):
             return t.capitalize()
     return None
 
+def extract_domain(url):
+    try:
+        parsed = urlparse(url)
+        return parsed.netloc.replace("www.", "")
+    except:
+        return None
+
+def clean_text(t):
+    return re.sub(r'\s+', ' ', t).strip()
+
+def is_duplicate(title=None, url=None):
+    filters = []
+    if title:
+        slug = hashlib.md5(title.encode()).hexdigest()
+        filters.append(("slug", slug))
+    if url:
+        filters.append(("source_url", url))
+
+    if not filters:
+        return False
+
+    query = supabase.table("news").select("id")
+    for key, value in filters:
+        query = query.eq(key, value)
+
+    response = query.execute()
+    return len(response.data) > 0
+
+def slug_exists(slug: str) -> bool:
+    response = supabase.table("news").select("id").eq("slug", slug).limit(1).execute()
+    return len(response.data) > 0
+
+def extract_image_url(url):
+    BLOCKED_DOMAINS = [
+        "espncdn.com", "gettyimages.com", "twimg.com", "dmxleo.com",
+        "facebook.com", "twitter.com", "fifa.com", "gstatic.com"
+    ]
+
+    try:
+        r = requests.get(url, timeout=10, headers={"User-Agent": "Mozilla/5.0"})
+        s = BeautifulSoup(r.text, "html.parser")
+        m = s.find("meta", property="og:image")
+        img_url = None
+
+        if m and m.get("content"):
+            img_url = m["content"]
+        else:
+            img = s.find("img")
+            if img and img.get("src") and not img["src"].startswith("data:"):
+                img_url = img["src"]
+
+        if img_url:
+            for blocked in BLOCKED_DOMAINS:
+                if blocked in img_url:
+                    print(f"⛔ Imagen bloqueada por dominio: {blocked}")
+                    return None
+            return img_url
+    except Exception as e:
+        print("⚠️ Img error:", e)
+
+    return None
+
+def rewrite_title(title):
+    print(f"✍️ Reescribiendo título: {title}")
+    headers = {
+        "Authorization": f"Bearer {OPENROUTER_API_KEY}",
+        "Content-Type": "application/json"
+    }
+    payload = {
+        "model": OPENROUTER_MODEL,
+        "messages": [
+            {
+                "role": "system",
+                "content": "Responde solo con el título reescrito. No agregues comillas, símbolos ni ninguna explicación. Manténlo corto, atractivo, en español neutro, sin adornos. Máximo 12 palabras."
+            },
+            {
+                "role": "user",
+                "content": f"{title}"
+            }
+        ]
+    }
+    try:
+        r = requests.post("https://openrouter.ai/api/v1/chat/completions", headers=headers, json=payload, timeout=20)
+        if r.status_code == 200:
+            new_title = r.json()["choices"][0]["message"]["content"].strip()
+            if len(new_title.split()) < 5:
+                print("❌ Título muy corto, se mantiene el original.")
+                return title
+            return new_title
+        else:
+            print("⚠️ Error OpenRouter:", r.text)
+            return title
+    except Exception as e:
+        print("⚠️ Error conexión OpenRouter:", e)
+        return title
+
+def generate_content(title, source_url):
+    headers = {
+        "Authorization": f"Bearer {OPENROUTER_API_KEY}",
+        "Content-Type": "application/json"
+    }
+    prompt = (
+        f"Redacta una noticia profesional clara, fluida, en español neutro y sin adornos, basada en este título: {title}. "
+        f"Debe ser un texto limpio, directo, sin frases decorativas, sin repetir el título, ni explicaciones ni encabezados. "
+        f"Solo el contenido. Cierra con esta fuente: {source_url}"
+    )
+    payload = {
+        "model": OPENROUTER_MODEL,
+        "messages": [
+            {"role": "system", "content": "Responde solo con el contenido de la noticia. No incluyas instrucciones ni encabezados."},
+            {"role": "user", "content": prompt}
+        ]
+    }
+    try:
+        r = requests.post("https://openrouter.ai/api/v1/chat/completions", headers=headers, json=payload, timeout=30)
+        if r.status_code == 200:
+            return r.json()["choices"][0]["message"]["content"].strip()
+        else:
+            print("⚠️ Error generación contenido:", r.text)
+            return ""
+    except Exception as e:
+        print("⚠️ Error conexión contenido:", e)
+        return ""
+
+def generate_summary(content):
+    if len(content) < 100:
+        return None
+    return content[:150] + "..."
+
 def extract_tags(content):
     keywords = ["fútbol", "liga", "partido", "equipo", "jugador", "goles", "campeón"]
     return [k for k in keywords if k in content.lower()]
-
-def generate_summary(content):
-    return content[:150] + "..." if len(content) > 100 else None
 
 def estimate_seo_score(content):
     score = 0
@@ -170,8 +220,29 @@ def estimate_seo_score(content):
     score += sum(1 for k in keywords if k in content.lower()) * 10
     return min(score, 100)
 
+def fetch_news():
+    articles = []
+    for src in NEWS_SOURCES:
+        print("🌐 Revisando fuente:", src)
+        try:
+            r = requests.get(src, timeout=10)
+            s = BeautifulSoup(r.text, "html.parser")
+            for a in s.find_all("a", href=True):
+                href, t = a["href"], clean_text(a.get_text())
+                if len(t) > 40 and any(p in href for p in ["noticia", "news", "/202"]):
+                    full = href if href.startswith("http") else src.rstrip("/") + "/" + href.lstrip("/")
+                    articles.append({"title": t, "url": full})
+        except Exception as e:
+            print("⚠️ Error fuente:", e)
+    return articles
+
 def save_article(article):
     slug = hashlib.md5(article['title'].encode()).hexdigest()
+
+    if slug_exists(slug):
+        print(f"⛔ Slug duplicado, omitiendo: {slug}")
+        return
+
     now = datetime.now(timezone.utc).isoformat()
     content = article["content"]
     data = {
@@ -179,7 +250,7 @@ def save_article(article):
         "slug": slug,
         "content": content,
         "image_url": article["image_url"],
-        "source_url": normalize_url(article["url"]),
+        "source_url": article["url"],
         "author": "Noirs Virals",
         "status": "draft",
         "published_at": now,
@@ -195,28 +266,8 @@ def save_article(article):
         "language": "es",
         "seo_score": estimate_seo_score(content)
     }
-    print("💾 Guardando:", data["title"])
+    print("💾 Guardando artículo:", data["title"])
     supabase.table("news").insert(data).execute()
-
-def fetch_news():
-    articles = []
-    seen_urls = set()
-    for src in NEWS_SOURCES:
-        print("🌍 Revisando fuente:", src)
-        try:
-            r = requests.get(src, timeout=10)
-            s = BeautifulSoup(r.text, "html.parser")
-            for a in s.find_all("a", href=True):
-                href, t = a["href"], clean_text(a.get_text())
-                if not href.startswith("http"):
-                    href = src.rstrip("/") + "/" + href.lstrip("/")
-                href = normalize_url(href)
-                if is_valid_article_link(href, t) and href not in seen_urls:
-                    seen_urls.add(href)
-                    articles.append({"title": t, "url": href})
-        except Exception as e:
-            print("⚠️ Error fuente:", e)
-    return articles
 
 def main():
     articles = fetch_news()
@@ -224,25 +275,25 @@ def main():
     saved = 0
     for art in articles:
         print("📌 Procesando:", art["title"][:60])
-        if is_duplicate(art["title"], art["url"]):
-            print("⛔ Duplicado.")
+        if is_duplicate(art["title"]):
+            print("⛔ Duplicado, saltando.")
             continue
         art["title"] = rewrite_title(art["title"])
         art["content"] = generate_content(art["title"], art["url"])
         if not art["content"] or len(art["content"]) < 200:
-            print("⛔ Contenido inválido.")
+            print("⛔ Contenido muy corto o vacío, saltando.")
             continue
         img = extract_image_url(art["url"])
-        if not img or "placeholder" in img:
-            print("⛔ Imagen inválida.")
+        if not img or "placeholder.com" in img:
+            print("⛔ Imagen no válida, saltando.")
             continue
         art["image_url"] = img
         save_article(art)
         saved += 1
-        time.sleep(1)
+        time.sleep(2)
         if saved >= 5:
             break
-    print("✅ Noticias guardadas:", saved)
+    print("✅ Proceso completado. Noticias guardadas:", saved)
 
 if __name__ == "__main__":
     main()
