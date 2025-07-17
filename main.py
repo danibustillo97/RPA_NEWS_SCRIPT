@@ -11,7 +11,7 @@ from dotenv import load_dotenv
 
 # 🔐 Configuración de entorno
 load_dotenv()
-OPENROUTER_API_KEY = "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"
+OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY")
 SUPABASE_URL = os.getenv("SUPABASE_URL")
 SUPABASE_KEY = os.getenv("SUPABASE_KEY")
 
