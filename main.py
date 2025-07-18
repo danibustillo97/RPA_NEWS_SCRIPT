@@ -1,67 +1,61 @@
 import os
 import re
 import time
-import hashlib
+import unicodedata
 import requests
 from urllib.parse import urlparse
 from datetime import datetime, timezone
 from bs4 import BeautifulSoup
 from supabase import create_client
 from dotenv import load_dotenv
+import dateparser
 
-# 🔐 Configuración de entorno
+# Configuración de entorno
 load_dotenv()
 OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY")
 SUPABASE_URL = os.getenv("SUPABASE_URL")
 SUPABASE_KEY = os.getenv("SUPABASE_KEY")
-
 supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
-
 NEWS_SOURCES = [
-    "https://www.espn.com.co/", "https://www.tycsports.com/",
-    "https://as.com/", "https://www.marca.com/", "https://www.futbolred.com/",
-    "https://www.elgrafico.com.ar/", "https://www.rpctv.com/deportes", "https://www.ovacion.pe/",
-    "https://www.eluniverso.com/deportes/", "https://mexico.as.com/", "https://espndeportes.espn.com/",
-    "https://us.as.com/", "https://www.elnacional.com/deportes/", "https://www.elcolombiano.com/deportes/",
-    "https://www.eltiempo.com/deportes", "https://www.elheraldo.co/deportes",
-    "https://www.depor.com/", "https://www.tudn.com/futbol", "https://www.larepublica.pe/deportes/"
+    "https://www.espn.com.co/", "https://www.tycsports.com/", "https://as.com/", "https://www.marca.com/",
+    "https://www.futbolred.com/", "https://www.elgrafico.com.ar/", "https://www.rpctv.com/deportes",
+    "https://www.ovacion.pe/", "https://www.eluniverso.com/deportes/", "https://mexico.as.com/",
+    "https://espndeportes.espn.com/", "https://us.as.com/", "https://www.elnacional.com/deportes/",
+    "https://www.elcolombiano.com/deportes/", "https://www.eltiempo.com/deportes", "https://www.depor.com/", "https://www.tudn.com/futbol",
+    "https://www.larepublica.pe/deportes/"
 ]
-
 LEAGUE_KEYWORDS = {
-    "premier": "Premier League",
-    "laliga": "La Liga",
-    "liga española": "La Liga",
-    "bundesliga": "Bundesliga",
-    "serie a": "Serie A",
-    "champions": "Champions League",
-    "libertadores": "Copa Libertadores",
-    "sudamericana": "Copa Sudamericana",
-    "mls": "MLS",
-    "colombia": "Liga BetPlay",
-    "argentina": "Liga Profesional Argentina",
-    "brasil": "Brasileirão",
-    "liga mx": "Liga MX",
-    "ecuador": "LigaPro",
-    "perú": "Liga 1",
-    "uruguay": "Primera División Uruguay",
-    "paraguay": "Primera División Paraguay",
-    "chile": "Primera División Chile"
+    "premier": "Premier League", "laliga": "La Liga", "liga española": "La Liga", "bundesliga": "Bundesliga",
+    "serie a": "Serie A", "champions": "Champions League", "libertadores": "Copa Libertadores",
+    "sudamericana": "Copa Sudamericana", "mls": "MLS", "colombia": "Liga BetPlay",
+    "argentina": "Liga Profesional Argentina", "brasil": "Brasileirão", "liga mx": "Liga MX",
+    "ecuador": "LigaPro", "perú": "Liga 1", "uruguay": "Primera División Uruguay",
+    "paraguay": "Primera División Paraguay", "chile": "Primera División Chile"
 }
-
 COUNTRIES = [
     "colombia", "españa", "argentina", "brasil", "méxico", "alemania", "inglaterra", "italia", "francia",
     "ecuador", "perú", "uruguay", "chile", "paraguay", "venezuela", "estados unidos"
 ]
-
 TEAMS = [
     "barcelona", "real madrid", "manchester", "liverpool", "juventus", "bayern", "inter", "milan",
-    "river", "boca", "nacional", "junior", "américa", "santa fe", "medellín", "atlético nacional", 
+    "river", "boca", "nacional", "junior", "américa", "santa fe", "medellín", "atlético nacional",
     "flamengo", "palmeiras", "pumas", "chivas", "cruz azul"
 ]
-
 OPENROUTER_MODEL = "meta-llama/llama-3-70b-instruct"
 
-def detect_league(t): 
+def generate_slug(title):
+    slug = title.lower()
+    slug = unicodedata.normalize("NFKD", slug).encode("ascii", "ignore").decode("utf-8")
+    slug = re.sub(r"[^\w\s-]", "", slug)
+    slug = re.sub(r"[\s_-]+", "-", slug)
+    slug = slug.strip("-")
+    return slug
+
+def is_duplicate(slug, source_url):
+    r = supabase.table("news").select("slug", "source_url").or_(f"slug.eq.{slug},source_url.eq.{source_url}").execute()
+    return len(r.data) > 0
+
+def detect_league(t):
     for k, v in LEAGUE_KEYWORDS.items():
         if k in t.lower():
             return v
@@ -89,57 +83,19 @@ def extract_domain(url):
 def clean_text(t):
     return re.sub(r'\s+', ' ', t).strip()
 
-def is_duplicate(title=None, url=None):
-    filters = []
-    if title:
-        slug = hashlib.md5(title.encode()).hexdigest()
-        filters.append(("slug", slug))
-    if url:
-        filters.append(("source_url", url))
-
-    if not filters:
-        return False
-
-    query = supabase.table("news").select("id")
-    for key, value in filters:
-        query = query.eq(key, value)
-
-    response = query.execute()
-    return len(response.data) > 0
-
-def slug_exists(slug: str) -> bool:
-    response = supabase.table("news").select("id").eq("slug", slug).limit(1).execute()
-    return len(response.data) > 0
-
 def extract_image_url(url):
-    BLOCKED_DOMAINS = [
-        "espncdn.com", "gettyimages.com", "twimg.com", "dmxleo.com",
-        "facebook.com", "twitter.com", "fifa.com", "gstatic.com"
-    ]
-
     try:
-        r = requests.get(url, timeout=10, headers={"User-Agent": "Mozilla/5.0"})
+        r = requests.get(url, timeout=10)
         s = BeautifulSoup(r.text, "html.parser")
         m = s.find("meta", property="og:image")
-        img_url = None
-
         if m and m.get("content"):
-            img_url = m["content"]
-        else:
-            img = s.find("img")
-            if img and img.get("src") and not img["src"].startswith("data:"):
-                img_url = img["src"]
-
-        if img_url:
-            for blocked in BLOCKED_DOMAINS:
-                if blocked in img_url:
-                    print(f"⛔ Imagen bloqueada por dominio: {blocked}")
-                    return None
-            return img_url
+            return m["content"]
+        img = s.find("img")
+        if img and img.get("src") and not img["src"].startswith("data:"):
+            return img["src"]
     except Exception as e:
         print("⚠️ Img error:", e)
-
-    return None
+    return "https://via.placeholder.com/1200x675.png?text=Noticia+deportiva"
 
 def rewrite_title(title):
     print(f"✍️ Reescribiendo título: {title}")
@@ -150,14 +106,8 @@ def rewrite_title(title):
     payload = {
         "model": OPENROUTER_MODEL,
         "messages": [
-            {
-                "role": "system",
-                "content": "Responde solo con el título reescrito. No agregues comillas, símbolos ni ninguna explicación. Manténlo corto, atractivo, en español neutro, sin adornos. Máximo 12 palabras."
-            },
-            {
-                "role": "user",
-                "content": f"{title}"
-            }
+            {"role": "system", "content": "Responde solo con el título reescrito. No agregues comillas, símbolos ni ninguna explicación. Manténlo corto, atractivo, en español neutro, sin adornos. Máximo 12 palabras."},
+            {"role": "user", "content": title}
         ]
     }
     try:
@@ -165,14 +115,10 @@ def rewrite_title(title):
         if r.status_code == 200:
             new_title = r.json()["choices"][0]["message"]["content"].strip()
             if len(new_title.split()) < 5:
-                print("❌ Título muy corto, se mantiene el original.")
                 return title
             return new_title
-        else:
-            print("⚠️ Error OpenRouter:", r.text)
-            return title
-    except Exception as e:
-        print("⚠️ Error conexión OpenRouter:", e)
+        return title
+    except:
         return title
 
 def generate_content(title, source_url):
@@ -196,11 +142,8 @@ def generate_content(title, source_url):
         r = requests.post("https://openrouter.ai/api/v1/chat/completions", headers=headers, json=payload, timeout=30)
         if r.status_code == 200:
             return r.json()["choices"][0]["message"]["content"].strip()
-        else:
-            print("⚠️ Error generación contenido:", r.text)
-            return ""
-    except Exception as e:
-        print("⚠️ Error conexión contenido:", e)
+        return ""
+    except:
         return ""
 
 def generate_summary(content):
@@ -231,18 +174,29 @@ def fetch_news():
                 href, t = a["href"], clean_text(a.get_text())
                 if len(t) > 40 and any(p in href for p in ["noticia", "news", "/202"]):
                     full = href if href.startswith("http") else src.rstrip("/") + "/" + href.lstrip("/")
-                    articles.append({"title": t, "url": full})
+                    # Intentar extraer la fecha de publicación
+                    published_at = None
+                    try:
+                        date_tag = a.find_previous('time') or a.find_next('time')
+                        if date_tag:
+                            published_at_str = date_tag.get_text()
+                            published_at = dateparser.parse(published_at_str)
+                        else:
+                            date_meta = s.find("meta", attrs={"property": "article:published_time"})
+                            if date_meta and date_meta.get("content"):
+                                published_at_str = date_meta.get("content")
+                                published_at = dateparser.parse(published_at_str)
+                        if published_at and published_at.tzinfo is None:
+                            published_at = published_at.replace(tzinfo=timezone.utc)
+                    except Exception as e:
+                        print("⚠️ Error al extraer fecha:", e)
+                    articles.append({"title": t, "url": full, "published_at": published_at})
         except Exception as e:
             print("⚠️ Error fuente:", e)
     return articles
 
 def save_article(article):
-    slug = hashlib.md5(article['title'].encode()).hexdigest()
-
-    if slug_exists(slug):
-        print(f"⛔ Slug duplicado, omitiendo: {slug}")
-        return
-
+    slug = generate_slug(article["title"])
     now = datetime.now(timezone.utc).isoformat()
     content = article["content"]
     data = {
@@ -272,16 +226,24 @@ def save_article(article):
 def main():
     articles = fetch_news()
     print("🔍 Total artículos encontrados:", len(articles))
+    default_date = datetime.min.replace(tzinfo=timezone.utc)
+    articles_sorted = sorted(articles, key=lambda x: x['published_at'] if x['published_at'] else default_date, reverse=True)
+
     saved = 0
-    for art in articles:
-        print("📌 Procesando:", art["title"][:60])
-        if is_duplicate(art["title"]):
-            print("⛔ Duplicado, saltando.")
+    for art in articles_sorted:
+        if not art['published_at']:
             continue
+
         art["title"] = rewrite_title(art["title"])
+        slug = generate_slug(art["title"])
+        print("Slug generado:", slug)  # Depuración
+        if is_duplicate(slug, art["url"]):  # Verifica duplicados usando slug y la URL
+            print("⛔ Noticia duplicada:", slug)
+            continue
+
         art["content"] = generate_content(art["title"], art["url"])
         if not art["content"] or len(art["content"]) < 200:
-            print("⛔ Contenido muy corto o vacío, saltando.")
+            print("⛔ Contenido muy corto, saltando.")
             continue
         img = extract_image_url(art["url"])
         if not img or "placeholder.com" in img:
