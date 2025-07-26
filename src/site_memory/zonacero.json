@@ -1,0 +1,7 @@
+{
+  "list_selector": "article",
+  "title_selector": "h3 a, h2 a",
+  "image_selector": "img",
+  "content_selector": "div.field-item.even p",
+  "fallbacks": []
+}

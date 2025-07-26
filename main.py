@@ -3,6 +3,7 @@ import re
 import time
 import unicodedata
 import requests
+import logging
 from urllib.parse import urlparse
 from datetime import datetime, timezone
 from bs4 import BeautifulSoup
@@ -10,20 +11,39 @@ from supabase import create_client
 from dotenv import load_dotenv
 import dateparser
 
-# Configuración de entorno
-load_dotenv()
-OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY")
-SUPABASE_URL = os.getenv("SUPABASE_URL")
-SUPABASE_KEY = os.getenv("SUPABASE_KEY")
-supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
-NEWS_SOURCES = [
-    "https://www.espn.com.co/", "https://www.tycsports.com/", "https://as.com/", "https://www.marca.com/",
-    "https://www.futbolred.com/", "https://www.elgrafico.com.ar/", "https://www.rpctv.com/deportes",
-    "https://www.ovacion.pe/", "https://www.eluniverso.com/deportes/", "https://mexico.as.com/",
-    "https://espndeportes.espn.com/", "https://us.as.com/", "https://www.elnacional.com/deportes/",
-    "https://www.elcolombiano.com/deportes/", "https://www.eltiempo.com/deportes", "https://www.depor.com/", "https://www.tudn.com/futbol",
-    "https://www.larepublica.pe/deportes/"
-]
+HISTORIAL_FILE = "visited_urls.txt"
+
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s [%(levelname)s] %(message)s',
+)
+
+def load_visited_urls():
+    if not os.path.exists(HISTORIAL_FILE):
+        return set()
+    with open(HISTORIAL_FILE, "r", encoding="utf-8") as f:
+        return set(line.strip() for line in f if line.strip())
+
+def save_visited_url(url):
+    with open(HISTORIAL_FILE, "a", encoding="utf-8") as f:
+        f.write(url + "\n")
+
+visited_urls = load_visited_urls()
+
+CATEGORIES = {
+    "deporte": ["fútbol", "liga", "gol", "equipo", "partido", "copa", "jugador", "deporte", "champions", "final", "junior", "barranquilla"],
+    "economía": ["economía", "bolsa", "dólar", "finanzas", "impuestos", "negocios", "banco", "comercio"],
+    "política": ["política", "elección", "congreso", "senado", "presidente", "ministro", "gobierno", "alcalde"],
+    "salud": ["salud", "virus", "covid", "enfermedad", "hospital", "vacuna", "medicina"],
+    "tecnología": ["tecnología", "software", "hardware", "internet", "redes sociales", "ciencia", "robot", "inteligencia artificial"],
+    "internacional": ["eeuu", "china", "rusia", "venezuela", "ucrania", "naciones unidas", "acuerdo", "conflicto", "europa"],
+    "cultura": ["cultura", "cine", "música", "arte", "literatura", "concierto", "exposición"],
+    "entretenimiento": ["farandula", "celebridad", "espectáculo", "show", "televisión", "reality"],
+    "judicial": ["corte", "justicia", "denuncia", "proceso", "fiscalía", "juez", "sentencia"],
+    "colombia": ["colombia", "bogotá", "medellín", "cali", "barranquilla", "cartagena", "manizales", "pereira", "bucaramanga"],
+    "junior": ["junior", "junior de barranquilla", "tiburón", "barranquilla", "rojiblanco", "banderazo"]
+}
+
 LEAGUE_KEYWORDS = {
     "premier": "Premier League", "laliga": "La Liga", "liga española": "La Liga", "bundesliga": "Bundesliga",
     "serie a": "Serie A", "champions": "Champions League", "libertadores": "Copa Libertadores",
@@ -32,173 +52,190 @@ LEAGUE_KEYWORDS = {
     "ecuador": "LigaPro", "perú": "Liga 1", "uruguay": "Primera División Uruguay",
     "paraguay": "Primera División Paraguay", "chile": "Primera División Chile"
 }
+
 COUNTRIES = [
     "colombia", "españa", "argentina", "brasil", "méxico", "alemania", "inglaterra", "italia", "francia",
     "ecuador", "perú", "uruguay", "chile", "paraguay", "venezuela", "estados unidos"
 ]
+
 TEAMS = [
-    "barcelona", "real madrid", "manchester", "liverpool", "juventus", "bayern", "inter", "milan",
+    "junior", "junior de barranquilla", "barcelona", "real madrid", "manchester", "liverpool", "juventus", "bayern", "inter", "milan",
     "river", "boca", "nacional", "junior", "américa", "santa fe", "medellín", "atlético nacional",
     "flamengo", "palmeiras", "pumas", "chivas", "cruz azul"
 ]
-OPENROUTER_MODEL = "meta-llama/llama-3-70b-instruct"
 
-def generate_slug(title):
-    slug = title.lower()
-    slug = unicodedata.normalize("NFKD", slug).encode("ascii", "ignore").decode("utf-8")
+NEWS_SOURCES = [
+    "https://www.eltiempo.com/", "https://www.elcolombiano.com/", "https://www.semana.com/", "https://caracol.com.co/", "https://www.rcnradio.com/",
+    "https://www.larepublica.co/", "https://www.bluradio.com/", "https://www.elespectador.com/", "https://noticias.canal1.com.co/", "https://www.vanguardia.com/",
+    "https://www.elheraldo.co/", "https://zonacero.com/", "https://www.adnradio.com.co/", "https://www.elpais.com.co/",
+    "https://www.antena2.com/", "https://www.futbolred.com/", "https://deportes.canalrcn.com/",
+    "https://www.infobae.com/", "https://www.tycsports.com/", "https://www.ole.com.ar/", "https://www.clarin.com/", "https://www.lanacion.com.ar/",
+    "https://www.marca.com/", "https://as.com/", "https://www.mundodeportivo.com/", "https://www.elmundo.es/", "https://elpais.com/",
+    "https://cnnespanol.cnn.com/", "https://www.bbc.com/mundo", "https://elpais.com/", "https://www.eluniverso.com/",
+    "https://www.abc.es/", "https://www.20minutos.es/", "https://www.expansion.com/",
+    "https://www.xataka.com/", "https://hipertextual.com/", "https://www.fayerwayer.com/", "https://techcetera.co/", "https://www.dw.com/es/",
+    "https://www.nytimes.com/es/", "https://www.nationalgeographic.com.es/", "https://www.noticiasrcn.com/tecnologia",
+    "https://www.portafolio.co/", "https://www.dinero.com/", "https://forbes.co/",
+    "https://www.sopitas.com/", "https://www.latercera.com/", "https://www.bolavip.com/", "https://www.goal.com/es",
+    "https://www.elcomercio.pe/", "https://www.elbocon.pe/", "https://www.larepublica.pe/",
+    "https://www.mediotiempo.com/", "https://www.debate.com.mx/deportes/", "https://www.univision.com/noticias/",
+    "https://www.culturagenial.com/es/", "https://www.elcultural.com/", "https://www.elconfidencial.com/cultura/"
+]
+
+# ENV y conexión supabase
+from dotenv import load_dotenv
+load_dotenv()
+SUPABASE_URL = os.getenv("SUPABASE_URL")
+SUPABASE_KEY = os.getenv("SUPABASE_KEY")
+supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
+
+def rewrite_title(title: str) -> str:
+    return title.strip().capitalize()
+
+def clean_text(text: str) -> str:
+    return re.sub(r"\s+", " ", text).strip()
+
+def clean_ai_text(text: str) -> str:
+    return re.sub(r"\s+", " ", text).strip()
+
+def summarize_text(text: str) -> str:
+    return text[:160] + "..." if len(text) > 160 else text
+
+def extract_tags(text: str) -> list:
+    return list(set(re.findall(r'\b\w{4,}\b', text.lower())))[:5]
+
+def generate_slug(title: str) -> str:
+    slug = unicodedata.normalize("NFKD", title.lower()).encode("ascii", "ignore").decode("utf-8")
     slug = re.sub(r"[^\w\s-]", "", slug)
-    slug = re.sub(r"[\s_-]+", "-", slug)
-    slug = slug.strip("-")
+    slug = re.sub(r"[\s_-]+", "-", slug).strip("-")
     return slug
 
-def is_duplicate(slug, source_url):
-    r = supabase.table("news").select("slug", "source_url").or_(f"slug.eq.{slug},source_url.eq.{source_url}").execute()
-    return len(r.data) > 0
+def is_duplicate(slug: str, source_url: str) -> bool:
+    res = supabase.table("news").select("slug", "source_url").or_(f"slug.eq.{slug},source_url.eq.{source_url}").execute()
+    return bool(res.data)
 
-def detect_league(t):
+def detect_category(title: str, content: str) -> str:
+    text = (title + " " + content).lower()
+    for cat, keywords in CATEGORIES.items():
+        for kw in keywords:
+            if kw in text:
+                if cat == "junior":
+                    return "banderazo rojo"
+                return cat
+    return "actualidad"
+
+def detect_league(text: str) -> str:
+    text = text.lower()
     for k, v in LEAGUE_KEYWORDS.items():
-        if k in t.lower():
+        if k in text:
             return v
     return "General"
 
-def detect_country(text):
+def detect_country(text: str):
+    text = text.lower()
     for c in COUNTRIES:
-        if c in text.lower():
+        if c in text:
             return c.capitalize()
     return None
 
-def detect_team(text):
+def detect_team(text: str):
+    text = text.lower()
     for t in TEAMS:
-        if t in text.lower():
+        if t in text:
             return t.capitalize()
     return None
 
-def extract_domain(url):
+def extract_domain(url: str):
     try:
-        parsed = urlparse(url)
-        return parsed.netloc.replace("www.", "")
-    except:
+        return urlparse(url).netloc.replace("www.", "")
+    except Exception:
         return None
 
-def clean_text(t):
-    return re.sub(r'\s+', ' ', t).strip()
-
-def extract_image_url(url):
-    try:
-        r = requests.get(url, timeout=10)
-        s = BeautifulSoup(r.text, "html.parser")
-        m = s.find("meta", property="og:image")
-        if m and m.get("content"):
-            return m["content"]
-        img = s.find("img")
-        if img and img.get("src") and not img["src"].startswith("data:"):
-            return img["src"]
-    except Exception as e:
-        print("⚠️ Img error:", e)
-    return "https://via.placeholder.com/1200x675.png?text=Noticia+deportiva"
-
-def rewrite_title(title):
-    print(f"✍️ Reescribiendo título: {title}")
-    headers = {
-        "Authorization": f"Bearer {OPENROUTER_API_KEY}",
-        "Content-Type": "application/json"
-    }
-    payload = {
-        "model": OPENROUTER_MODEL,
-        "messages": [
-            {"role": "system", "content": "Responde solo con el título reescrito. No agregues comillas, símbolos ni ninguna explicación. Manténlo corto, atractivo, en español neutro, sin adornos. Máximo 12 palabras."},
-            {"role": "user", "content": title}
-        ]
-    }
-    try:
-        r = requests.post("https://openrouter.ai/api/v1/chat/completions", headers=headers, json=payload, timeout=20)
-        if r.status_code == 200:
-            new_title = r.json()["choices"][0]["message"]["content"].strip()
-            if len(new_title.split()) < 5:
-                return title
-            return new_title
-        return title
-    except:
-        return title
-
-def generate_content(title, source_url):
-    headers = {
-        "Authorization": f"Bearer {OPENROUTER_API_KEY}",
-        "Content-Type": "application/json"
-    }
-    prompt = (
-        f"Redacta una noticia profesional clara, fluida, en español neutro y sin adornos, basada en este título: {title}. "
-        f"Debe ser un texto limpio, directo, sin frases decorativas, sin repetir el título, ni explicaciones ni encabezados. "
-        f"Solo el contenido. Cierra con esta fuente: {source_url}"
-    )
-    payload = {
-        "model": OPENROUTER_MODEL,
-        "messages": [
-            {"role": "system", "content": "Responde solo con el contenido de la noticia. No incluyas instrucciones ni encabezados."},
-            {"role": "user", "content": prompt}
-        ]
-    }
-    try:
-        r = requests.post("https://openrouter.ai/api/v1/chat/completions", headers=headers, json=payload, timeout=30)
-        if r.status_code == 200:
-            return r.json()["choices"][0]["message"]["content"].strip()
-        return ""
-    except:
-        return ""
-
-def generate_summary(content):
-    if len(content) < 100:
-        return None
-    return content[:150] + "..."
-
-def extract_tags(content):
-    keywords = ["fútbol", "liga", "partido", "equipo", "jugador", "goles", "campeón"]
-    return [k for k in keywords if k in content.lower()]
-
-def estimate_seo_score(content):
-    score = 0
-    if len(content) > 300:
-        score += 50
-    keywords = ["fútbol", "liga", "partido", "equipo", "jugador", "goles"]
-    score += sum(1 for k in keywords if k in content.lower()) * 10
+def estimate_seo_score(content: str) -> int:
+    score = 50 if len(content) > 300 else 0
+    keywords = ["fútbol", "liga", "partido", "equipo", "jugador", "goles", "junior", "colombia", "noticia", "presidente"]
+    score += sum(10 for k in keywords if k in content.lower())
     return min(score, 100)
 
-def fetch_news():
+def extract_body(url: str) -> str:
+    try:
+        res = requests.get(url, timeout=10)
+        soup = BeautifulSoup(res.text, "html.parser")
+        desc = soup.find("meta", attrs={"name": "description"})
+        ps = soup.find_all("p")
+        ps_text = " ".join([p.get_text(strip=True) for p in ps if len(p.get_text(strip=True)) > 40])
+        if desc and desc.get("content"):
+            text = desc["content"].strip() + " " + ps_text
+        else:
+            text = ps_text if ps_text else soup.get_text(" ", strip=True)
+        text = re.sub(r'\s+', ' ', text)
+        text = ". ".join(dict.fromkeys(text.split(". ")))  # Eliminar frases duplicadas
+        return text[:3500]
+    except Exception as e:
+        logging.warning(f"[extract_body] Error: {e}")
+        return ""
+
+def extract_image_url(url: str) -> str:
+    try:
+        res = requests.get(url, timeout=10)
+        soup = BeautifulSoup(res.text, "html.parser")
+        for selector in ["meta[property='og:image']", "img"]:
+            tag = soup.select_one(selector)
+            if tag:
+                src = tag.get("content") if selector.startswith("meta") else tag.get("src")
+                if src and not src.startswith("data:"):
+                    return src
+    except Exception as e:
+        logging.warning(f"[extract_image_url] {e}")
+    return "https://via.placeholder.com/1200x675.png?text=Noticia+destacada"
+
+def generate_content(title: str, url: str) -> str:
+    body = extract_body(url)
+    if not body or len(body) < 100:
+        logging.info(f"[generate_content] Contenido insuficiente para {title}")
+        return rewrite_title(title)
+    texto = rewrite_title(title)
+    if texto.lower() not in body.lower():
+        texto += ". "
+    texto += body
+    texto = clean_text(texto)
+    if len(texto) < 400:
+        texto += (
+            " Información en desarrollo y análisis de expertos serán añadidos a medida que surjan nuevos datos relevantes."
+        )
+    return texto
+
+def fetch_news() -> list:
     articles = []
     for src in NEWS_SOURCES:
-        print("🌐 Revisando fuente:", src)
+        logging.info(f"Revisando fuente: {src}")
         try:
-            r = requests.get(src, timeout=10)
-            s = BeautifulSoup(r.text, "html.parser")
-            for a in s.find_all("a", href=True):
-                href, t = a["href"], clean_text(a.get_text())
-                if len(t) > 40 and any(p in href for p in ["noticia", "news", "/202"]):
-                    full = href if href.startswith("http") else src.rstrip("/") + "/" + href.lstrip("/")
-                    # Intentar extraer la fecha de publicación
-                    published_at = None
-                    try:
-                        date_tag = a.find_previous('time') or a.find_next('time')
-                        if date_tag:
-                            published_at_str = date_tag.get_text()
-                            published_at = dateparser.parse(published_at_str)
-                        else:
-                            date_meta = s.find("meta", attrs={"property": "article:published_time"})
-                            if date_meta and date_meta.get("content"):
-                                published_at_str = date_meta.get("content")
-                                published_at = dateparser.parse(published_at_str)
-                        if published_at and published_at.tzinfo is None:
-                            published_at = published_at.replace(tzinfo=timezone.utc)
-                    except Exception as e:
-                        print("⚠️ Error al extraer fecha:", e)
-                    articles.append({"title": t, "url": full, "published_at": published_at})
+            res = requests.get(src, timeout=10)
+            soup = BeautifulSoup(res.text, "html.parser")
+            for a in soup.find_all("a", href=True):
+                href, text = a["href"], clean_text(a.get_text())
+                if len(text) > 40 and any(p in href for p in ["noticia", "news", "/202", "junior", "colombia", "politica", "deporte", "economia", "cultura", "salud"]):
+                    full_url = href if href.startswith("http") else src.rstrip("/") + "/" + href.lstrip("/")
+                    if full_url in visited_urls:
+                        continue
+                    time_tag = a.find_previous('time') or a.find_next('time')
+                    published_at = dateparser.parse(time_tag.get_text()) if time_tag else None
+                    if not published_at:
+                        meta = soup.find("meta", attrs={"property": "article:published_time"})
+                        published_at = dateparser.parse(meta["content"]) if meta and meta.get("content") else None
+                    if published_at and not published_at.tzinfo:
+                        published_at = published_at.replace(tzinfo=timezone.utc)
+                    articles.append({"title": text, "url": full_url, "published_at": published_at})
         except Exception as e:
-            print("⚠️ Error fuente:", e)
+            logging.warning(f"[fetch_news] Error fuente {src}: {e}")
+            continue
     return articles
 
-def save_article(article):
+def save_article(article: dict):
     slug = generate_slug(article["title"])
     now = datetime.now(timezone.utc).isoformat()
-    content = article["content"]
+    content = clean_ai_text(article["content"])
+    category = detect_category(article["title"], content)
     data = {
         "title": article["title"],
         "slug": slug,
@@ -209,53 +246,51 @@ def save_article(article):
         "status": "draft",
         "published_at": now,
         "created_at": now,
-        "category": detect_league(article["title"]),
+        "category": category,
         "source": extract_domain(article["url"]),
         "league": detect_league(article["title"]),
         "country": detect_country(content),
         "team": detect_team(content),
         "tags": extract_tags(content),
-        "summary": generate_summary(content),
+        "summary": summarize_text(content),
         "relevance_score": estimate_seo_score(content),
         "language": "es",
         "seo_score": estimate_seo_score(content)
     }
-    print("💾 Guardando artículo:", data["title"])
     supabase.table("news").insert(data).execute()
+    save_visited_url(article["url"])
+    logging.info(f"Artículo guardado: {data['title']} | Categoría: {category}")
 
 def main():
     articles = fetch_news()
-    print("🔍 Total artículos encontrados:", len(articles))
-    default_date = datetime.min.replace(tzinfo=timezone.utc)
-    articles_sorted = sorted(articles, key=lambda x: x['published_at'] if x['published_at'] else default_date, reverse=True)
-
+    logging.info(f"Total artículos encontrados: {len(articles)}")
+    articles = sorted(
+        [a for a in articles if a["published_at"]],
+        key=lambda x: x["published_at"],
+        reverse=True
+    )
     saved = 0
-    for art in articles_sorted:
-        if not art['published_at']:
+    for article in articles:
+        article["title"] = rewrite_title(article["title"])
+        slug = generate_slug(article["title"])
+        if is_duplicate(slug, article["url"]):
+            logging.info(f"Noticia duplicada ignorada: {slug}")
             continue
-
-        art["title"] = rewrite_title(art["title"])
-        slug = generate_slug(art["title"])
-        print("Slug generado:", slug)  # Depuración
-        if is_duplicate(slug, art["url"]):  # Verifica duplicados usando slug y la URL
-            print("⛔ Noticia duplicada:", slug)
+        article["content"] = generate_content(article["title"], article["url"])
+        if not article["content"] or len(article["content"]) < 200:
+            logging.info(f"Contenido demasiado corto: {article['title']}")
             continue
-
-        art["content"] = generate_content(art["title"], art["url"])
-        if not art["content"] or len(art["content"]) < 200:
-            print("⛔ Contenido muy corto, saltando.")
+        image = extract_image_url(article["url"])
+        if not image or "placeholder.com" in image:
+            logging.info(f"Imagen no válida o genérica: {article['title']}")
             continue
-        img = extract_image_url(art["url"])
-        if not img or "placeholder.com" in img:
-            print("⛔ Imagen no válida, saltando.")
-            continue
-        art["image_url"] = img
-        save_article(art)
+        article["image_url"] = image
+        save_article(article)
         saved += 1
-        time.sleep(2)
-        if saved >= 5:
+        if saved >= 30:
             break
-    print("✅ Proceso completado. Noticias guardadas:", saved)
+        time.sleep(1)
+    logging.info(f"✅ Proceso finalizado. Noticias guardadas: {saved}")
 
 if __name__ == "__main__":
     main()
