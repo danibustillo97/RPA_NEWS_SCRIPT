@@ -9,12 +9,14 @@ from bs4 import BeautifulSoup
 from supabase import create_client
 from dotenv import load_dotenv
 import dateparser
+from openai import OpenAI
 
 # Configuración de entorno
 load_dotenv()
-OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY")
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 SUPABASE_URL = os.getenv("SUPABASE_URL")
 SUPABASE_KEY = os.getenv("SUPABASE_KEY")
+client = OpenAI(api_key=OPENAI_API_KEY)
 supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
 NEWS_SOURCES = [
      "https://www.antena2.com/", "https://www.tycsports.com/", "https://as.com/", "https://www.marca.com/",
@@ -41,7 +43,7 @@ TEAMS = [
     "river", "boca", "nacional", "junior", "américa", "santa fe", "medellín", "atlético nacional",
     "flamengo", "palmeiras", "pumas", "chivas", "cruz azul"
 ]
-OPENROUTER_MODEL = "meta-llama/llama-3-70b-instruct"
+OPENAI_MODEL = "gpt-3.5-turbo"
 
 def generate_slug(title):
     slug = title.lower()
@@ -97,63 +99,120 @@ def extract_image_url(url):
         print("⚠️ Img error:", e)
     return "https://via.placeholder.com/1200x675.png?text=Noticia+deportiva"
 
+def extract_body(url):
+    try:
+        r = requests.get(url, timeout=10)
+        s = BeautifulSoup(r.text, "html.parser")
+        desc = s.find("meta", attrs={"name": "description"})
+        ps = s.find_all("p")
+        ps_text = " ".join(p.get_text(strip=True) for p in ps if len(p.get_text(strip=True)) > 40)
+        if desc and desc.get("content"):
+            text = desc["content"].strip() + " " + ps_text
+        else:
+            text = ps_text if ps_text else s.get_text(" ", strip=True)
+        text = re.sub(r'\s+', ' ', text)
+        return text[:3500]
+    except Exception as e:
+        print("⚠️ Body error:", e)
+        return ""
+
 def rewrite_title(title):
     print(f"✍️ Reescribiendo título: {title}")
-    headers = {
-        "Authorization": f"Bearer {OPENROUTER_API_KEY}",
-        "Content-Type": "application/json"
-    }
-    payload = {
-        "model": OPENROUTER_MODEL,
-        "messages": [
-            {"role": "system", "content": "Responde solo con el título reescrito. No agregues comillas, símbolos ni ninguna explicación. Manténlo corto, atractivo, en español neutro, sin adornos. Máximo 12 palabras."},
-            {"role": "user", "content": title}
-        ]
-    }
+    messages = [
+        {
+            "role": "system",
+            "content": (
+                "Eres un editor experto en SEO para noticias deportivas. "
+                "Devuelve un titular atractivo en español neutro, máximo 12 palabras, "
+                "sin comillas ni explicaciones."
+            ),
+        },
+        {"role": "user", "content": title},
+    ]
     try:
-        r = requests.post("https://openrouter.ai/api/v1/chat/completions", headers=headers, json=payload, timeout=20)
-        if r.status_code == 200:
-            new_title = r.json()["choices"][0]["message"]["content"].strip()
-            if len(new_title.split()) < 5:
-                return title
-            return new_title
-        return title
-    except:
+        r = client.chat.completions.create(
+            model=OPENAI_MODEL,
+            messages=messages,
+            temperature=0.7,
+        )
+        new_title = r.choices[0].message.content.strip()
+        if len(new_title.split()) < 5:
+            return title
+        return new_title
+    except Exception as e:
+        print("⚠️ Error rewrite:", e)
         return title
 
 def generate_content(title, source_url):
-    headers = {
-        "Authorization": f"Bearer {OPENROUTER_API_KEY}",
-        "Content-Type": "application/json"
-    }
-    prompt = (
-        f"Redacta una noticia profesional clara, fluida, en español neutro y sin adornos, basada en este título: {title}. "
-        f"Debe ser un texto limpio, directo, sin frases decorativas, sin repetir el título, ni explicaciones ni encabezados. "
-        f"Solo el contenido. que sea informativo y relevante, con un tono serio y profesional. y que no tenga menosde 300 palabras.  "
-    )
-    payload = {
-        "model": OPENROUTER_MODEL,
-        "messages": [
-            {"role": "system", "content": "Responde solo con el contenido de la noticia. No incluyas instrucciones ni encabezados."},
-            {"role": "user", "content": prompt}
-        ]
-    }
-    try:
-        r = requests.post("https://openrouter.ai/api/v1/chat/completions", headers=headers, json=payload, timeout=30)
-        if r.status_code == 200:
-            return r.json()["choices"][0]["message"]["content"].strip()
+    body = extract_body(source_url)
+    if not body:
         return ""
-    except:
+    messages = [
+        {
+            "role": "system",
+            "content": (
+                "Eres un periodista especializado en SEO que escribe noticias en español neutro. "
+                "Redacta un artículo original de al menos 300 palabras, tono serio e informativo, "
+                "optimizado con palabras clave y sin instrucciones ni encabezados."
+            ),
+        },
+        {
+            "role": "user",
+            "content": f"Título: {title}\nTexto base: {body}",
+        },
+    ]
+    try:
+        r = client.chat.completions.create(
+            model=OPENAI_MODEL,
+            messages=messages,
+            temperature=0.7,
+        )
+        return r.choices[0].message.content.strip()
+    except Exception as e:
+        print("⚠️ Error content:", e)
         return ""
 
 def generate_summary(content):
     if len(content) < 100:
         return None
-    return content[:150] + "..."
+    messages = [
+        {
+            "role": "system",
+            "content": "Genera un resumen breve en español neutro, máximo 30 palabras, optimizado para SEO.",
+        },
+        {"role": "user", "content": content},
+    ]
+    try:
+        r = client.chat.completions.create(
+            model=OPENAI_MODEL,
+            messages=messages,
+            temperature=0.5,
+        )
+        return r.choices[0].message.content.strip()
+    except Exception as e:
+        print("⚠️ Error summary:", e)
+        return content[:150] + "..."
 
 def extract_tags(content):
-    keywords = ["fútbol", "liga", "partido", "equipo", "jugador", "goles", "campeón"]
-    return [k for k in keywords if k in content.lower()]
+    messages = [
+        {
+            "role": "system",
+            "content": "Extrae hasta cinco palabras clave relevantes en español, separadas por comas.",
+        },
+        {"role": "user", "content": content},
+    ]
+    try:
+        r = client.chat.completions.create(
+            model=OPENAI_MODEL,
+            messages=messages,
+            temperature=0.3,
+        )
+        tags_text = r.choices[0].message.content.strip()
+        return [t.strip() for t in tags_text.split(",") if t.strip()]
+    except Exception as e:
+        print("⚠️ Error tags:", e)
+        keywords = ["fútbol", "liga", "partido", "equipo", "jugador", "goles", "campeón"]
+        return [k for k in keywords if k in content.lower()]
 
 def estimate_seo_score(content):
     score = 0
