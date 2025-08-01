@@ -3,3 +3,4 @@ beautifulsoup4
 python-dotenv
 supabase
 dateparser
+openai>=1.0.0
