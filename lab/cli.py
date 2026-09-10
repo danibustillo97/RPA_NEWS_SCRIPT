@@ -39,6 +39,7 @@ from lab.media.paths import (  # noqa: E402
     character_profiles_dir, ensure_story_media_dirs, generation_requests_path,
     media_plan_path, story_media_dir, visual_style_path,
 )
+from lab.sequence import planner as sequence_planner  # noqa: E402
 import lab.ingestion.run  # noqa: E402,F401  (registra el job "run_scraper")
 import lab.media.generation  # noqa: E402,F401  (registra los job types media_generation/media_edit/media_retry)
 
@@ -257,6 +258,84 @@ def cmd_media_status(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_sequence_record(args: argparse.Namespace) -> int:
+    ensure_runtime_dirs()
+    story_id = args.story_id
+    errors = sequence_planner.validate_sequence(story_id)
+    if errors:
+        print(json.dumps({"error": "sequence.json inválido", "details": errors}, ensure_ascii=False, indent=2))
+        return 1
+
+    sequence = sequence_planner.load(story_id)
+    shots = sequence["shots"]
+    transform_required_count = sum(1 for s in shots if s.get("transform_required") is True)
+    with_asset = sum(1 for s in shots if s.get("asset_id") is not None)
+
+    job = record_job(
+        "sequence_plan",
+        params={"story_id": story_id},
+        result={
+            "shots": len(shots),
+            "with_asset": with_asset,
+            "text_only": len(shots) - with_asset,
+            "transform_required": transform_required_count,
+            "total_duration_seconds": sequence["total_duration_seconds"],
+        },
+    )
+
+    print(json.dumps({
+        "story_id": story_id,
+        "job_id": job.id,
+        "sequence_id": sequence["sequence_id"],
+        "total_shots": len(shots),
+        "shots_with_asset": with_asset,
+        "shots_text_only": len(shots) - with_asset,
+        "shots_needing_transform": transform_required_count,
+        "total_duration_seconds": sequence["total_duration_seconds"],
+        "status": sequence["status"],
+    }, ensure_ascii=False, indent=2))
+    return 0
+
+
+def cmd_sequence_review(args: argparse.Namespace) -> int:
+    ensure_runtime_dirs()
+    story_id = args.story_id
+    errors = sequence_planner.validate_sequence(story_id)
+    if errors:
+        print(json.dumps({"error": "sequence.json inválido, no puede pasar a READY_FOR_REVIEW", "details": errors}, ensure_ascii=False, indent=2))
+        return 1
+    sequence = sequence_planner.set_status(story_id, "READY_FOR_REVIEW")
+    print(json.dumps({"story_id": story_id, "sequence_id": sequence["sequence_id"], "status": sequence["status"]}, ensure_ascii=False, indent=2))
+    return 0
+
+
+def cmd_sequence_status(args: argparse.Namespace) -> int:
+    ensure_runtime_dirs()
+    story_id = args.story_id
+    sequence = sequence_planner.load(story_id)
+    if sequence is None:
+        print(json.dumps({"error": f"No hay sequence.json para {story_id!r} — correr /lab-sequence-plan primero"}, ensure_ascii=False))
+        return 1
+
+    shots = sequence["shots"]
+    with_asset = sum(1 for s in shots if s.get("asset_id") is not None)
+    transform_required_count = sum(1 for s in shots if s.get("transform_required") is True)
+
+    print(json.dumps({
+        "story_id": story_id,
+        "sequence_id": sequence["sequence_id"],
+        "status": sequence["status"],
+        "target_format": sequence["target_format"],
+        "target_aspect_ratio": sequence["target_aspect_ratio"],
+        "total_shots": len(shots),
+        "shots_with_asset": with_asset,
+        "shots_text_only": len(shots) - with_asset,
+        "shots_needing_transform": transform_required_count,
+        "total_duration_seconds": sequence["total_duration_seconds"],
+    }, ensure_ascii=False, indent=2))
+    return 0
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(prog="lab", description="LAB — Local Editorial & Creative Lab")
     sub = parser.add_subparsers(dest="command", required=True)
@@ -307,6 +386,18 @@ def main() -> int:
     p_media_status = sub.add_parser("media-status", help="Muestra el estado de requests/assets de una historia")
     p_media_status.add_argument("story_id")
     p_media_status.set_defaults(func=cmd_media_status)
+
+    p_seq_record = sub.add_parser("sequence-record", help="Valida sequence.json (referencias, vocabulario, consistencia), registra el job sequence_plan, imprime el resumen")
+    p_seq_record.add_argument("story_id")
+    p_seq_record.set_defaults(func=cmd_sequence_record)
+
+    p_seq_review = sub.add_parser("sequence-review", help="DRAFT -> READY_FOR_REVIEW (exige que sequence.json sea válido)")
+    p_seq_review.add_argument("story_id")
+    p_seq_review.set_defaults(func=cmd_sequence_review)
+
+    p_seq_status = sub.add_parser("sequence-status", help="Muestra el estado de la secuencia de una historia")
+    p_seq_status.add_argument("story_id")
+    p_seq_status.set_defaults(func=cmd_sequence_status)
 
     args = parser.parse_args()
     return args.func(args)

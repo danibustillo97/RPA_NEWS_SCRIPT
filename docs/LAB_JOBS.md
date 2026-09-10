@@ -1,6 +1,6 @@
 ---
 title: LAB — Jobs
-status: Fase 3
+status: Fase 4
 date: 2026-09-10
 ---
 
@@ -53,7 +53,8 @@ Las etapas del pipeline editorial (`docs/LAB_EDITORIAL_INTELLIGENCE.md`) no las 
 | `media_generation` | `_HANDLERS` (`lab.media.generation._job_handler`), vía `create_and_run()` | Ejecuta un `generation_request` con `operation: "generate"` | 3 (activa) |
 | `media_edit` | ídem, `operation: "edit"` | Ejecuta un `generation_request` de edición | 3 (activa) |
 | `media_retry` | ídem, reintento de un request `FAILED` | Reintenta un `generation_request` que había fallado | 3 (activa) |
-| *(futuros)* `export` | — | — | 4 |
+| `sequence_plan` | `record_job()`, invocado por `lab.cli sequence-record` | Registra que la skill `lab-sequence-planning` terminó de armar `sequence.json` de una historia | 4 (activa) |
+| *(futuros)* `export` | — | — | 5 |
 
 ## Agregar un tipo de job nuevo
 

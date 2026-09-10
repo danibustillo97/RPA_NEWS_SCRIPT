@@ -53,6 +53,12 @@ def media_blueprint_path(story_id: str) -> Path:
     return story_media_dir(story_id) / "media_blueprint.json"
 
 
+def sequence_path(story_id: str) -> Path:
+    """Fase 4 -- vive en la misma carpeta que media_blueprint.json, no en un
+    árbol de carpetas propio (ver lab/sequence/)."""
+    return story_media_dir(story_id) / "sequence.json"
+
+
 def ensure_story_media_dirs(story_id: str) -> Path:
     """Crea la estructura minima para que la skill de planning pueda escribir.
     Las subcarpetas de images/ se crean bajo demanda en generation.py, no aca

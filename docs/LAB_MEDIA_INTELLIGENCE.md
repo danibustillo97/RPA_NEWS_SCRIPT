@@ -117,9 +117,9 @@ Fase 3 también termina en `READY_FOR_REVIEW` -- el `WorkspaceItem` **no cambia 
 
 `/lab-media-plan` (o el CLI `media-record-plan`) siempre corre antes de gastar nada -- imprime cuántas escenas hay de cada tipo y cuántas requieren generación real, para que el humano decida si sigue antes de que `/lab-generate-media` llame de verdad a Gemini (costo real por llamada).
 
-## Punto de extensión para Fase 4
+## Punto de extensión para Fase 4 (actualizado -- decisión real, no la original)
 
-`media_blueprint.json` conecta `story -> scenes -> media_requirements -> assets`. Fase 4 (Secuencia/Animación) solo necesita **agregar** una clave `sequence` (`asset + duration + motion + camera_motion + transition + audio + narration`) a cada entrada de `scenes[]` -- aditivo, no rompe nada de Fase 3. Esa clave no se crea vacía en Fase 3 (evitar campos fantasma sin uso).
+Esta sección originalmente anticipaba que Fase 4 agregaría una clave `sequence` a cada entrada de `media_blueprint.json :: scenes[]`. **Eso cambió al implementar Fase 4**: una secuencia ordena *shots* a través de toda la historia y un shot no corresponde necesariamente 1:1 con una escena, así que anidarlo en `scenes[]` no encajaba. Fase 4 usa un artifact separado, `sequence.json` (mismo directorio que `media_blueprint.json`), con `shots[]` como lista plana referenciando `scene_id`/`asset_id` por ID — `media_blueprint.json` no se modificó. Ver `docs/LAB_SEQUENCE_ENGINE.md` para el diseño completo y el razonamiento del cambio.
 
 ## Fuera de alcance de Fase 3
 
