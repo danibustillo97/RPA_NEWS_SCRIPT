@@ -1,0 +1,4 @@
+# Dependencias solo para desarrollo/testing -- no se instalan en runtime de
+# producción de LAB (ver lab/requirements.txt). Instalar con:
+#   lab/.venv/Scripts/python.exe -m pip install -r lab/requirements-dev.txt
+pytest

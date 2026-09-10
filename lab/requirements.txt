@@ -1,0 +1,13 @@
+# Dependencias de LAB — deliberadamente mínimas.
+# Sin supabase, sin openai, sin python-dotenv: LAB no depende de Supabase
+# (ver docs/LAB_ARCHITECTURE_AUDIT.md sección N.3). Los mismos paquetes que
+# ya usa main.py para scraping — probados, sin dependencias nuevas.
+requests
+beautifulsoup4
+dateparser
+
+# Fase 3 — Media Intelligence: SDK oficial de Gemini (generación/edición de
+# imágenes) y Pillow (para calcular dimensiones reales de los assets
+# guardados, no confiar ciegamente en lo que reporte la API).
+google-genai
+Pillow

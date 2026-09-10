@@ -1,0 +1,32 @@
+# --- Secrets (ver docs/LAB_SECURITY.md — .env ya está trackeado, pendiente de limpieza manual) ---
+.env
+.env.local
+*.env
+
+# --- Python ---
+__pycache__/
+*.pyc
+venv/
+.venv/
+lab/.venv/
+
+# --- LAB runtime data (workspace/jobs/logs son datos de trabajo, no código) ---
+lab/workspace/incoming/*.json
+lab/workspace/processing/*/
+lab/workspace/review/*/
+lab/workspace/approved/*.json
+lab/workspace/rejected/*.json
+lab/workspace/media/*/
+lab/workspace/exports/*.json
+lab/workspace/.dedupe_index.json
+lab/jobs/queue/*.json
+lab/jobs/done/*.json
+lab/jobs/failed/*.json
+lab/logs/*.log
+!lab/workspace/**/.gitkeep
+!lab/jobs/**/.gitkeep
+!lab/logs/.gitkeep
+
+# --- OS / editor ---
+.DS_Store
+Thumbs.db
