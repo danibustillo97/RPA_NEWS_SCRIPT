@@ -39,6 +39,7 @@ from lab.media.paths import (  # noqa: E402
     character_profiles_dir, ensure_story_media_dirs, generation_requests_path,
     media_plan_path, story_media_dir, visual_style_path,
 )
+from lab.animation import planner as animation_planner  # noqa: E402
 from lab.sequence import planner as sequence_planner  # noqa: E402
 import lab.ingestion.run  # noqa: E402,F401  (registra el job "run_scraper")
 import lab.media.generation  # noqa: E402,F401  (registra los job types media_generation/media_edit/media_retry)
@@ -336,6 +337,59 @@ def cmd_sequence_status(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_animation_plan(args: argparse.Namespace) -> int:
+    """Fase 4.2 etapa 2 -- wrapper fino sobre lab.animation.planner (etapa 1,
+    sin cambios): genera/actualiza animation_plan.json desde el sequence.json
+    real, valida, registra el job y muestra el resumen. No decide nada por
+    su cuenta -- toda la lógica vive en lab/animation/, esto solo la invoca."""
+    ensure_runtime_dirs()
+    story_id = args.story_id
+
+    try:
+        plan = animation_planner.init_animation_plan(story_id)
+    except ValueError as exc:
+        print(json.dumps({"error": str(exc)}, ensure_ascii=False))
+        return 1
+
+    errors = animation_planner.validate_animation_plan(story_id)
+
+    shots_summary = [
+        {
+            "shot_id": s["shot_id"],
+            "asset_id": s["asset_id"],
+            "strategy": s["strategy"],
+            "backend": s["backend"],
+            "motion": s["motion"]["type"],
+            "source_transform": s["source_transform"],
+        }
+        for s in plan["shots"]
+    ]
+
+    job = record_job(
+        "animation_plan",
+        params={"story_id": story_id},
+        result={
+            "shots": len(plan["shots"]),
+            "total_duration_seconds": plan["total_duration_seconds"],
+            "valid": not errors,
+        },
+        error="; ".join(errors) if errors else None,
+    )
+
+    print(json.dumps({
+        "story_id": story_id,
+        "sequence_id": plan["sequence_id"],
+        "animation_plan_id": plan["animation_plan_id"],
+        "job_id": job.id,
+        "status": plan["status"],
+        "total_shots": len(plan["shots"]),
+        "total_duration_seconds": plan["total_duration_seconds"],
+        "shots": shots_summary,
+        "validation_errors": errors,
+    }, ensure_ascii=False, indent=2))
+    return 0 if not errors else 1
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(prog="lab", description="LAB — Local Editorial & Creative Lab")
     sub = parser.add_subparsers(dest="command", required=True)
@@ -398,6 +452,10 @@ def main() -> int:
     p_seq_status = sub.add_parser("sequence-status", help="Muestra el estado de la secuencia de una historia")
     p_seq_status.add_argument("story_id")
     p_seq_status.set_defaults(func=cmd_sequence_status)
+
+    p_anim_plan = sub.add_parser("animation-plan", help="Genera/actualiza animation_plan.json desde sequence.json, valida, registra el job animation_plan")
+    p_anim_plan.add_argument("story_id")
+    p_anim_plan.set_defaults(func=cmd_animation_plan)
 
     args = parser.parse_args()
     return args.func(args)
