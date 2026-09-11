@@ -1,6 +1,6 @@
 ---
-title: LAB -- Render Planning (Fase 4.2, etapa 3)
-status: Fase 4.2 etapa 3 implementada (sin skill/CLI/ejecución todavía)
+title: LAB -- Render Planning (Fase 4.2, etapas 3-4)
+status: Fase 4.2 etapa 4 implementada (skill + CLI; sin ejecución real todavía)
 date: 2026-09-10
 ---
 
@@ -97,7 +97,11 @@ No lanza — devuelve una lista de errores:
 
 ## Aislamiento
 
-`lab/render/` **lee** `animation_plan.json` (`lab.animation.planner.load`, solo lectura) y `asset_registry.json` (`lab.media.registry.get_asset`, solo lectura) — nunca los escribe, tampoco `sequence.json` ni `media_blueprint.json`. Sin skill, sin comando CLI, sin job registrado todavía (llega junto con la integración de Claude Code, etapa futura). Gemini, Cloudflare, y todo lo anterior de Fase 3/4 quedan sin modificar.
+`lab/render/` **lee** `animation_plan.json` (`lab.animation.planner.load`, solo lectura) y `asset_registry.json` (`lab.media.registry.get_asset`, solo lectura) — nunca los escribe, tampoco `sequence.json` ni `media_blueprint.json`. Gemini, Cloudflare, y todo lo anterior de Fase 3/4 quedan sin modificar.
+
+## Skill + CLI (Fase 4.2 etapa 4)
+
+`.claude/skills/lab-render-planning` + `/lab-render-plan <story_id>` + `lab.cli render-plan <story_id>` (mismo patrón que la Etapa 2 de Animation Planning: la skill orquesta y reporta, no decide nada; toda la lógica sigue viviendo en `lab.render.planner`). El comando CLI llama a `init_render_plan()`, corre `validate_render_plan()`, registra el job `render_plan` vía `lab.core.job.record_job()`, e imprime el resumen. Sigue sin haber ejecución real de ningún tipo.
 
 ## Verificado con datos reales
 
@@ -105,4 +109,4 @@ No lanza — devuelve una lista de errores:
 
 ## Qué falta (fuera de esta etapa)
 
-Skill + comando CLI de Claude Code para Render Planning (equivalente a la Etapa 2 de Animation Planning), un `Renderer` real (FFmpeg, que traduciría `transform_geometry` a filtros concretos como `scale`/`pad`/`crop` y ejecutaría de verdad), y un `VideoProvider` real (IA) — ninguno implementado todavía.
+Un `Renderer` real (FFmpeg, que traduciría `transform_geometry` a filtros concretos como `scale`/`pad`/`crop` y ejecutaría de verdad) y un `VideoProvider` real (IA) — ninguno implementado todavía. `render_plan.json` sigue siendo 100% declarativo: ningún frame de video se genera en esta etapa.

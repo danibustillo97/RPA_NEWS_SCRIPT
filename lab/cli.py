@@ -40,6 +40,7 @@ from lab.media.paths import (  # noqa: E402
     media_plan_path, story_media_dir, visual_style_path,
 )
 from lab.animation import planner as animation_planner  # noqa: E402
+from lab.render import planner as render_planner  # noqa: E402
 from lab.sequence import planner as sequence_planner  # noqa: E402
 import lab.ingestion.run  # noqa: E402,F401  (registra el job "run_scraper")
 import lab.media.generation  # noqa: E402,F401  (registra los job types media_generation/media_edit/media_retry)
@@ -390,6 +391,60 @@ def cmd_animation_plan(args: argparse.Namespace) -> int:
     return 0 if not errors else 1
 
 
+def cmd_render_plan(args: argparse.Namespace) -> int:
+    """Fase 4.2 etapa 4 -- wrapper fino sobre lab.render.planner (etapa 3,
+    sin cambios): genera/actualiza render_plan.json desde animation_plan.json
+    real, valida, registra el job y muestra el resumen. No decide nada por
+    su cuenta -- toda la lógica vive en lab/render/, esto solo la invoca."""
+    ensure_runtime_dirs()
+    story_id = args.story_id
+
+    try:
+        plan = render_planner.init_render_plan(story_id)
+    except ValueError as exc:
+        print(json.dumps({"error": str(exc)}, ensure_ascii=False))
+        return 1
+
+    errors = render_planner.validate_render_plan(story_id)
+
+    shots_summary = [
+        {
+            "shot_id": s["shot_id"], "asset_id": s["asset_id"],
+            "backend": s["backend"],
+            "transform_geometry": s["transform_geometry"],
+            "status": s["status"],
+        }
+        for s in plan["shots"]
+    ]
+
+    job = record_job(
+        "render_plan",
+        params={"story_id": story_id},
+        result={
+            "shots": len(plan["shots"]),
+            "target_width": plan["target_width"],
+            "target_height": plan["target_height"],
+            "valid": not errors,
+        },
+        error="; ".join(errors) if errors else None,
+    )
+
+    print(json.dumps({
+        "story_id": story_id,
+        "animation_plan_id": plan["animation_plan_id"],
+        "render_plan_id": plan["render_plan_id"],
+        "job_id": job.id,
+        "status": plan["status"],
+        "target_aspect_ratio": plan["target_aspect_ratio"],
+        "target_width": plan["target_width"],
+        "target_height": plan["target_height"],
+        "total_shots": len(plan["shots"]),
+        "shots": shots_summary,
+        "validation_errors": errors,
+    }, ensure_ascii=False, indent=2))
+    return 0 if not errors else 1
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(prog="lab", description="LAB — Local Editorial & Creative Lab")
     sub = parser.add_subparsers(dest="command", required=True)
@@ -456,6 +511,10 @@ def main() -> int:
     p_anim_plan = sub.add_parser("animation-plan", help="Genera/actualiza animation_plan.json desde sequence.json, valida, registra el job animation_plan")
     p_anim_plan.add_argument("story_id")
     p_anim_plan.set_defaults(func=cmd_animation_plan)
+
+    p_render_plan = sub.add_parser("render-plan", help="Genera/actualiza render_plan.json desde animation_plan.json, valida, registra el job render_plan")
+    p_render_plan.add_argument("story_id")
+    p_render_plan.set_defaults(func=cmd_render_plan)
 
     args = parser.parse_args()
     return args.func(args)
