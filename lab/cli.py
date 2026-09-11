@@ -44,6 +44,7 @@ from lab.render import planner as render_planner  # noqa: E402
 from lab.sequence import planner as sequence_planner  # noqa: E402
 import lab.ingestion.run  # noqa: E402,F401  (registra el job "run_scraper")
 import lab.media.generation  # noqa: E402,F401  (registra los job types media_generation/media_edit/media_retry)
+import lab.render.renderer  # noqa: E402,F401  (registra el job type render_execute)
 
 logger = get_logger(__name__)
 
@@ -445,6 +446,37 @@ def cmd_render_plan(args: argparse.Namespace) -> int:
     return 0 if not errors else 1
 
 
+def cmd_render_execute(args: argparse.Namespace) -> int:
+    """Fase 4.2 etapa 5 -- wrapper fino sobre lab.render.renderer: ejecuta
+    FFmpeg de verdad sobre los shots elegibles de render_plan.json (o uno
+    solo con --shot-id) como un job real (create_and_run, mismo mecanismo
+    que media_generation), reescribe render_plan.json con el resultado real
+    de cada shot. No reimplementa nada -- toda la lógica vive en
+    lab.render.renderer, esto solo la invoca una vez y reporta el job."""
+    ensure_runtime_dirs()
+    story_id = args.story_id
+
+    job = create_and_run("render_execute", {"story_id": story_id, "render_shot_id": args.shot_id})
+
+    if job.result is None:
+        # El handler lanzó antes de devolver un resultado (ej. no hay
+        # render_plan.json todavía) -- job.py ya lo registró como failed.
+        print(json.dumps({"error": job.error}, ensure_ascii=False))
+        return 1
+
+    result = job.result
+    print(json.dumps({
+        "story_id": story_id,
+        "job_id": job.id,
+        "processed": len(result["results"]),
+        "done": result["done"],
+        "failed": result["failed"],
+        "pending": result["pending"],
+        "results": result["results"],
+    }, ensure_ascii=False, indent=2))
+    return 0 if result["failed"] == 0 else 1
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(prog="lab", description="LAB — Local Editorial & Creative Lab")
     sub = parser.add_subparsers(dest="command", required=True)
@@ -515,6 +547,11 @@ def main() -> int:
     p_render_plan = sub.add_parser("render-plan", help="Genera/actualiza render_plan.json desde animation_plan.json, valida, registra el job render_plan")
     p_render_plan.add_argument("story_id")
     p_render_plan.set_defaults(func=cmd_render_plan)
+
+    p_render_exec = sub.add_parser("render-execute", help="Ejecuta FFmpeg real sobre los shots elegibles de render_plan.json (imagen + geometría ya calculada), registra el job render_execute")
+    p_render_exec.add_argument("story_id")
+    p_render_exec.add_argument("--shot-id", default=None, metavar="RENDER_SHOT_ID", help="Procesar solo este render_shot_id")
+    p_render_exec.set_defaults(func=cmd_render_execute)
 
     args = parser.parse_args()
     return args.func(args)

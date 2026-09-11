@@ -12,3 +12,7 @@ from lab.media.paths import story_media_dir
 
 def render_plan_path(story_id: str) -> Path:
     return story_media_dir(story_id) / "render_plan.json"
+
+
+def rendered_video_path(story_id: str, render_shot_id: str) -> Path:
+    return story_media_dir(story_id) / "videos" / "rendered" / f"{render_shot_id}.mp4"

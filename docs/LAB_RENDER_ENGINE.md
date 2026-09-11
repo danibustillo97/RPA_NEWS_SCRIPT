@@ -1,7 +1,7 @@
 ---
-title: LAB -- Render Planning (Fase 4.2, etapas 3-4)
-status: Fase 4.2 etapa 4 implementada (skill + CLI; sin ejecución real todavía)
-date: 2026-09-10
+title: LAB -- Render Planning y Renderer (Fase 4.2, etapas 3-5)
+status: Fase 4.2 etapa 5 implementada (primer video real generado con FFmpeg)
+date: 2026-09-11
 ---
 
 # Render Planning
@@ -107,6 +107,36 @@ No lanza — devuelve una lista de errores:
 
 `793ff158b714` → `render_plan.json`: `animation_plan_id: "anim_001"`, `target_width/height: 1080×1920`, 5 shots. `shot_02` (único con asset real) queda `backend: FFMPEG_LOCAL`, `transform_geometry.computable: true` con los números exactos de arriba. Los otros 4: `transform_geometry: null`, `status: PENDING`. `validate_render_plan()` → `[]`. `sequence.json`, `asset_registry.json` y `animation_plan.json` quedaron byte-a-byte idénticos antes y después (SHA-256).
 
+## Renderer (Fase 4.2 etapa 5) — primer video real
+
+`lab/render/renderer.py` es el primer módulo de LAB que ejecuta FFmpeg de verdad y produce un archivo de video. Toma `render_plan.json` (Etapa 3, sin cambios en su lógica) y, por cada shot elegible, corre:
+
+```
+ffmpeg -y -loop 1 -i <imagen fuente> -t <duration_seconds> -vf "<filtro>" -r 30 -pix_fmt yuv420p -c:v libx264 <videos/rendered/<render_shot_id>.mp4>
+```
+
+donde `<filtro>` es exactamente la geometría ya calculada por `compute_transform_geometry()` (Etapa 3) traducida a filtros estándar de FFmpeg — nunca recalculada:
+
+- `transform_geometry: null` → `scale={target_width}:{target_height}` (el aspect ratio ya matchea, solo se escala a las dimensiones absolutas).
+- `operation: "PAD"` (EXTEND/FIT) → `scale={scaled_width}:{scaled_height},pad={target_width}:{target_height}:{pad_left}:{pad_top}:color=black`.
+- `operation: "CROP"` → `scale={scaled_width}:{scaled_height},crop={target_width}:{target_height}:{crop_left}:{crop_top}`.
+
+### Decisión de alcance: shots sin asset quedan `PENDING`, no inventados
+
+De los 5 shots reales de `793ff158b714`, solo `shot_02` tiene un asset de imagen; los otros 4 son texto-only (`asset_id: null`). Renderizar un shot sin imagen requeriría inventar un tratamiento visual (fondo sólido, texto superpuesto) que ninguna etapa anterior decidió — violaría la disciplina NO INVENTAR de todo el proyecto. El Renderer solo procesa shots con `asset_id` real y `transform_geometry` computable-o-`null`; los demás quedan con `status: "PENDING"` sin tocar (vocabulario ya existente en `RENDER_SHOT_STATUS`, sin agregar valores nuevos). `FAILED` queda reservado para cuando sí se intentó renderizar (asset presente, geometría resuelta) y FFmpeg falló de verdad (archivo corrupto, binario no encontrado, timeout).
+
+### Escritura de `render_plan.json`
+
+A diferencia de `lab/render/planner.py` (puro, sin I/O de procesos, sin cambios en esta etapa), `renderer.py` sí reescribe `render_plan.json` tras ejecutar — es el primer artifact de Fase 4.2 con ejecución real que reportar: cada shot procesado queda con `status: "DONE"` + `output_path` (relativo, `videos/rendered/<render_shot_id>.mp4`), o `status: "FAILED"` + `error` (stderr de FFmpeg). Hace su propia lectura/escritura (mismo formato JSON que `planner.py`) en vez de agregarle una función de escritura a `planner.py`, para mantener esa separación clara. `sequence.json`, `asset_registry.json` y `animation_plan.json` siguen sin tocarse — solo se leen (`lab.render.planner.load`, `lab.media.registry.get_asset`).
+
+### Configuración
+
+`lab/config/settings.py :: FFMPEG_BINARY` — `LAB_FFMPEG_BINARY` (env var) > detectado en `PATH` (`shutil.which`) > `"ffmpeg"` literal como último fallback. Sin binario hardcodeado de ninguna máquina.
+
+### Comando
+
+`lab.cli render-execute <story_id> [--shot-id ID]` (sin skill nueva — ejecución 100% determinista, sin juicio editorial, mismo criterio que `/lab-generate-media`) — un solo job real (`create_and_run`, tipo `render_execute`, mismo mecanismo que `media_generation`).
+
 ## Qué falta (fuera de esta etapa)
 
-Un `Renderer` real (FFmpeg, que traduciría `transform_geometry` a filtros concretos como `scale`/`pad`/`crop` y ejecutaría de verdad) y un `VideoProvider` real (IA) — ninguno implementado todavía. `render_plan.json` sigue siendo 100% declarativo: ningún frame de video se genera en esta etapa.
+Concatenación final de todos los shots en un solo video, transiciones, audio, motion/Ken-Burns real (`zoompan` — necesitaría parámetros de movimiento que hoy no calcula ninguna etapa, sería inventar), y un `VideoProvider` real (IA, para shots `AI_VIDEO`) — ninguno implementado todavía.

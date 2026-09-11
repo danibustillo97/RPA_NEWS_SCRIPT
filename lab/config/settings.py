@@ -5,6 +5,7 @@ entorno, nunca hardcodeada — ver lab/config/.env.example y docs/LAB_SECURITY.m
 """
 
 import os
+import shutil
 from pathlib import Path
 
 _ENV_FILE = Path(__file__).resolve().parent / ".env"
@@ -57,3 +58,9 @@ CLOUDFLARE_IMAGE_MODEL = os.environ.get("CLOUDFLARE_IMAGE_MODEL", "@cf/black-for
 # testeable sin recargar el módulo — esta línea queda como referencia/default
 # documentado, mismo valor.
 MEDIA_PROVIDER = os.environ.get("LAB_MEDIA_PROVIDER", "gemini")
+
+# Fase 4.2 etapa 5 -- Renderer real. Binario de FFmpeg: override explícito
+# (LAB_FFMPEG_BINARY, útil cuando no está en PATH todavía en la sesión
+# actual) > detectado en PATH > "ffmpeg" literal como último fallback (falla
+# con un error claro de subprocess si tampoco existe ahí).
+FFMPEG_BINARY = os.environ.get("LAB_FFMPEG_BINARY") or shutil.which("ffmpeg") or "ffmpeg"
